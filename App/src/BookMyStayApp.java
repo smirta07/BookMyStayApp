@@ -1,37 +1,91 @@
+import java.util.HashMap;
+import java.util.Map;
 public class BookMyStayApp {
     public static void main(String[] args) {
 
-        // Create room objects (Polymorphism)
+        // Create room objects
         Room single = new SingleRoom();
         Room doubleroom = new DoubleRoom();
         Room suite = new SuiteRoom();
 
-        // Static availability (simple variables)
-        int singleAvailable = 5;
-        int doubleAvailable = 3;
-        int suiteAvailable = 2;
+        // Initialize inventory (Single Source of Truth)
+        RoomInventory inventory = new RoomInventory();
 
-        // Display details
-        System.out.println("=== Room Details & Availability ===\n");
+        inventory.addRoom(single.getRoomType(), 5);
+        inventory.addRoom(doubleroom.getRoomType(), 3);
+        inventory.addRoom(suite.getRoomType(), 2);
 
-        single.displayDetails();
-        System.out.println("Available: " + singleAvailable);
+        // Display room details with availability
+        System.out.println("=== Centralized Room Inventory ===\n");
+
+        displayRoom(single, inventory);
+        displayRoom(doubleroom, inventory);
+        displayRoom(suite, inventory);
+
+        // Example update
+        System.out.println("\nBooking 1 Single Room...\n");
+        inventory.updateAvailability("Single Room", -1);
+
+        displayRoom(single, inventory);
+
+        System.out.println("\nApplication terminated.");
+    }
+
+    // Helper method (demonstrates clean separation)
+    public static void displayRoom(Room room, RoomInventory inventory) {
+        room.displayDetails();
+        System.out.println("Available: " + inventory.getAvailability(room.getRoomType()));
         System.out.println("-----------------------------");
-
-        doubleroom.displayDetails();
-        System.out.println("Available: " + doubleAvailable);
-        System.out.println("-----------------------------");
-
-        suite.displayDetails();
-        System.out.println("Available: " + suiteAvailable);
-        System.out.println("-----------------------------");
-
-        System.out.println("Application terminated.");
     }
 }
 
 /**
- * Abstract class representing a generic Room.
+ * Inventory class managing all room availability.
+ * Acts as a single source of truth.
+ */
+class RoomInventory {
+
+    private Map<String, Integer> availabilityMap;
+
+    // Constructor initializes the HashMap
+    public RoomInventory() {
+        availabilityMap = new HashMap<>();
+    }
+
+    // Add or initialize room type
+    public void addRoom(String roomType, int count) {
+        availabilityMap.put(roomType, count);
+    }
+
+    // Get availability (O(1) lookup)
+    public int getAvailability(String roomType) {
+        return availabilityMap.getOrDefault(roomType, 0);
+    }
+
+    // Update availability (controlled modification)
+    public void updateAvailability(String roomType, int change) {
+        int current = getAvailability(roomType);
+        int updated = current + change;
+
+        if (updated < 0) {
+            System.out.println("Error: Not enough rooms available!");
+            return;
+        }
+
+        availabilityMap.put(roomType, updated);
+    }
+
+    // Display entire inventory
+    public void displayInventory() {
+        System.out.println("=== Inventory Snapshot ===");
+        for (Map.Entry<String, Integer> entry : availabilityMap.entrySet()) {
+            System.out.println(entry.getKey() + " -> " + entry.getValue());
+        }
+    }
+}
+
+/**
+ * Abstract Room class
  */
 abstract class Room {
 
@@ -45,22 +99,8 @@ abstract class Room {
         this.price = price;
     }
 
-    public int getBeds() {
-        return beds;
-    }
-
-    public double getSize() {
-        return size;
-    }
-
-    public double getPrice() {
-        return price;
-    }
-
-    // Abstract method
     public abstract String getRoomType();
 
-    // Common method
     public void displayDetails() {
         System.out.println("Room Type: " + getRoomType());
         System.out.println("Beds: " + beds);
@@ -70,45 +110,39 @@ abstract class Room {
 }
 
 /**
- * Single Room implementation
+ * Single Room
  */
 class SingleRoom extends Room {
-
     public SingleRoom() {
         super(1, 200, 50);
     }
 
-    @Override
     public String getRoomType() {
         return "Single Room";
     }
 }
 
 /**
- * Double Room implementation
+ * Double Room
  */
 class DoubleRoom extends Room {
-
     public DoubleRoom() {
         super(2, 350, 90);
     }
 
-    @Override
     public String getRoomType() {
         return "Double Room";
     }
 }
 
 /**
- * Suite Room implementation
+ * Suite Room
  */
 class SuiteRoom extends Room {
-
     public SuiteRoom() {
         super(3, 600, 200);
     }
 
-    @Override
     public String getRoomType() {
         return "Suite Room";
     }
