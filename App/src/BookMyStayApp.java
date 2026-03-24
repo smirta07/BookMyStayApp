@@ -1,4 +1,5 @@
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
 public class BookMyStayApp {
     public static void main(String[] args) {
 
@@ -7,74 +8,84 @@ public class BookMyStayApp {
         Room doubleroom = new DoubleRoom();
         Room suite = new SuiteRoom();
 
-        // Store room objects (Domain Layer)
-        List<Room> rooms = new ArrayList<>();
-        rooms.add(single);
-        rooms.add(doubleroom);
-        rooms.add(suite);
-
-        // Initialize inventory (State Layer)
+        // Initialize inventory (Single Source of Truth)
         RoomInventory inventory = new RoomInventory();
-        inventory.addRoom("Single Room", 5);
-        inventory.addRoom("Double Room", 0); // unavailable
-        inventory.addRoom("Suite Room", 2);
 
-        // Create Search Service
-        SearchService searchService = new SearchService();
+        inventory.addRoom(single.getRoomType(), 5);
+        inventory.addRoom(doubleroom.getRoomType(), 3);
+        inventory.addRoom(suite.getRoomType(), 2);
 
-        // Perform search (READ-ONLY)
-        System.out.println("=== Available Rooms ===\n");
-        searchService.searchAvailableRooms(rooms, inventory);
+        // Display room details with availability
+        System.out.println("=== Centralized Room Inventory ===\n");
+
+        displayRoom(single, inventory);
+        displayRoom(doubleroom, inventory);
+        displayRoom(suite, inventory);
+
+        // Example update
+        System.out.println("\nBooking 1 Single Room...\n");
+        inventory.updateAvailability("Single Room", -1);
+
+        displayRoom(single, inventory);
 
         System.out.println("\nApplication terminated.");
     }
-}
 
-/**
- * SearchService handles read-only operations.
- */
-class SearchService {
-
-    public void searchAvailableRooms(List<Room> rooms, RoomInventory inventory) {
-
-        for (Room room : rooms) {
-
-            int available = inventory.getAvailability(room.getRoomType());
-
-            // Defensive check: only show available rooms
-            if (available > 0) {
-                room.displayDetails();
-                System.out.println("Available: " + available);
-                System.out.println("-----------------------------");
-            }
-        }
+    // Helper method (demonstrates clean separation)
+    public static void displayRoom(Room room, RoomInventory inventory) {
+        room.displayDetails();
+        System.out.println("Available: " + inventory.getAvailability(room.getRoomType()));
+        System.out.println("-----------------------------");
     }
 }
 
 /**
- * Centralized Inventory (State Holder)
+ * Inventory class managing all room availability.
+ * Acts as a single source of truth.
  */
 class RoomInventory {
 
     private Map<String, Integer> availabilityMap;
 
+    // Constructor initializes the HashMap
     public RoomInventory() {
         availabilityMap = new HashMap<>();
     }
 
+    // Add or initialize room type
     public void addRoom(String roomType, int count) {
         availabilityMap.put(roomType, count);
     }
 
+    // Get availability (O(1) lookup)
     public int getAvailability(String roomType) {
         return availabilityMap.getOrDefault(roomType, 0);
     }
 
-    // NOTE: No update method used in search → read-only safety
+    // Update availability (controlled modification)
+    public void updateAvailability(String roomType, int change) {
+        int current = getAvailability(roomType);
+        int updated = current + change;
+
+        if (updated < 0) {
+            System.out.println("Error: Not enough rooms available!");
+            return;
+        }
+
+        availabilityMap.put(roomType, updated);
+    }
+
+    // Display entire inventory
+    public void displayInventory() {
+        System.out.println("=== Inventory Snapshot ===");
+        for (Map.Entry<String, Integer> entry : availabilityMap.entrySet()) {
+            System.out.println(entry.getKey() + " -> " + entry.getValue());
+        }
+    }
 }
 
 /**
- * Abstract Room class (Domain Model)
+ * Abstract Room class
  */
 abstract class Room {
 
