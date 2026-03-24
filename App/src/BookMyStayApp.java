@@ -1,149 +1,88 @@
-import java.util.HashMap;
-import java.util.Map;
+import java.util.LinkedList;
+import java.util.Queue;
+import java.time.LocalDateTime;
+import java.util.UUID;
 public class BookMyStayApp {
-    public static void main(String[] args) {
+    static class Reservation {
+        private String requestId;
+        private String guestName;
+        private String roomType;
+        private LocalDateTime requestTime;
 
-        // Create room objects
-        Room single = new SingleRoom();
-        Room doubleroom = new DoubleRoom();
-        Room suite = new SuiteRoom();
+        public Reservation(String guestName, String roomType) {
+            this.requestId = UUID.randomUUID().toString();
+            this.guestName = guestName;
+            this.roomType = roomType;
+            this.requestTime = LocalDateTime.now();
+        }
 
-        // Initialize inventory (Single Source of Truth)
-        RoomInventory inventory = new RoomInventory();
-
-        inventory.addRoom(single.getRoomType(), 5);
-        inventory.addRoom(doubleroom.getRoomType(), 3);
-        inventory.addRoom(suite.getRoomType(), 2);
-
-        // Display room details with availability
-        System.out.println("=== Centralized Room Inventory ===\n");
-
-        displayRoom(single, inventory);
-        displayRoom(doubleroom, inventory);
-        displayRoom(suite, inventory);
-
-        // Example update
-        System.out.println("\nBooking 1 Single Room...\n");
-        inventory.updateAvailability("Single Room", -1);
-
-        displayRoom(single, inventory);
-
-        System.out.println("\nApplication terminated.");
+        @Override
+        public String toString() {
+            return "Reservation{" +
+                    "requestId='" + requestId + '\'' +
+                    ", guestName='" + guestName + '\'' +
+                    ", roomType='" + roomType + '\'' +
+                    ", requestTime=" + requestTime +
+                    '}';
+        }
     }
 
-    // Helper method (demonstrates clean separation)
-    public static void displayRoom(Room room, RoomInventory inventory) {
-        room.displayDetails();
-        System.out.println("Available: " + inventory.getAvailability(room.getRoomType()));
-        System.out.println("-----------------------------");
-    }
-}
+    // -----------------------------
+    // Booking Queue
+    // -----------------------------
+    private Queue<Reservation> bookingQueue;
 
-/**
- * Inventory class managing all room availability.
- * Acts as a single source of truth.
- */
-class RoomInventory {
-
-    private Map<String, Integer> availabilityMap;
-
-    // Constructor initializes the HashMap
-    public RoomInventory() {
-        availabilityMap = new HashMap<>();
+    // Constructor (matches class name exactly!)
+    public BookMyStayApp() {
+        bookingQueue = new LinkedList<>();
     }
 
-    // Add or initialize room type
-    public void addRoom(String roomType, int count) {
-        availabilityMap.put(roomType, count);
+    // Submit booking request
+    public void submitRequest(String guestName, String roomType) {
+        Reservation reservation = new Reservation(guestName, roomType);
+        bookingQueue.offer(reservation);
+        System.out.println("Request added to queue: " + reservation);
     }
 
-    // Get availability (O(1) lookup)
-    public int getAvailability(String roomType) {
-        return availabilityMap.getOrDefault(roomType, 0);
+    // Process next request (FIFO)
+    public Reservation processNextRequest() {
+        Reservation reservation = bookingQueue.poll();
+        if (reservation != null) {
+            System.out.println("Processing request: " + reservation);
+        } else {
+            System.out.println("No requests to process.");
+        }
+        return reservation;
     }
 
-    // Update availability (controlled modification)
-    public void updateAvailability(String roomType, int change) {
-        int current = getAvailability(roomType);
-        int updated = current + change;
-
-        if (updated < 0) {
-            System.out.println("Error: Not enough rooms available!");
+    // Display all queued requests
+    public void displayQueue() {
+        if (bookingQueue.isEmpty()) {
+            System.out.println("Queue is empty.");
             return;
         }
-
-        availabilityMap.put(roomType, updated);
-    }
-
-    // Display entire inventory
-    public void displayInventory() {
-        System.out.println("=== Inventory Snapshot ===");
-        for (Map.Entry<String, Integer> entry : availabilityMap.entrySet()) {
-            System.out.println(entry.getKey() + " -> " + entry.getValue());
+        System.out.println("\nCurrent Booking Queue:");
+        for (Reservation r : bookingQueue) {
+            System.out.println(r);
         }
     }
-}
 
-/**
- * Abstract Room class
- */
-abstract class Room {
+    // -----------------------------
+    // Main Method (Demo)
+    // -----------------------------
+    public static void main(String[] args) {
 
-    private int beds;
-    private double size;
-    private double price;
+        BookMyStayApp app = new BookMyStayApp();
 
-    public Room(int beds, double size, double price) {
-        this.beds = beds;
-        this.size = size;
-        this.price = price;
-    }
+        app.submitRequest("Alice", "Deluxe");
+        app.submitRequest("Bob", "Standard");
+        app.submitRequest("Charlie", "Suite");
 
-    public abstract String getRoomType();
+        app.displayQueue();
 
-    public void displayDetails() {
-        System.out.println("Room Type: " + getRoomType());
-        System.out.println("Beds: " + beds);
-        System.out.println("Size: " + size + " sq.ft");
-        System.out.println("Price: $" + price);
-    }
-}
+        app.processNextRequest();
+        app.processNextRequest();
 
-/**
- * Single Room
- */
-class SingleRoom extends Room {
-    public SingleRoom() {
-        super(1, 200, 50);
-    }
-
-    public String getRoomType() {
-        return "Single Room";
-    }
-}
-
-/**
- * Double Room
- */
-class DoubleRoom extends Room {
-    public DoubleRoom() {
-        super(2, 350, 90);
-    }
-
-    public String getRoomType() {
-        return "Double Room";
-    }
-}
-
-/**
- * Suite Room
- */
-class SuiteRoom extends Room {
-    public SuiteRoom() {
-        super(3, 600, 200);
-    }
-
-    public String getRoomType() {
-        return "Suite Room";
+        app.displayQueue();
     }
 }
