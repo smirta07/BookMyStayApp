@@ -6,6 +6,12 @@ public class BookMyStayApp {
         }
     }
 
+    static class CancellationException extends Exception {
+        public CancellationException(String message) {
+            super(message);
+        }
+    }
+
     // -----------------------------
     // Reservation (Guest Request)
     // -----------------------------
@@ -15,6 +21,7 @@ public class BookMyStayApp {
         private String roomType;
         private String assignedRoomId;
         private double basePrice;
+        private boolean isCancelled = false;
 
         public Reservation(String guestName, String roomType, double basePrice) {
             this.requestId = UUID.randomUUID().toString();
@@ -35,8 +42,20 @@ public class BookMyStayApp {
             return roomType;
         }
 
+        public String getAssignedRoomId() {
+            return assignedRoomId;
+        }
+
+        public boolean isCancelled() {
+            return isCancelled;
+        }
+
         public void assignRoom(String roomId) {
             this.assignedRoomId = roomId;
+        }
+
+        public void cancel() {
+            this.isCancelled = true;
         }
 
         @Override
@@ -47,6 +66,7 @@ public class BookMyStayApp {
                     ", roomType='" + roomType + '\'' +
                     ", assignedRoomId='" + assignedRoomId + '\'' +
                     ", basePrice=$" + basePrice +
+                    ", cancelled=" + isCancelled +
                     '}';
         }
     }
@@ -79,6 +99,7 @@ public class BookMyStayApp {
     private Queue<Reservation> bookingQueue = new LinkedList<>();
     private Map<String, Integer> inventory = new HashMap<>();
     private Map<String, Set<String>> allocatedRooms = new HashMap<>();
+    private Stack<String> rollbackStack = new Stack<>();
 
     // Add-On Services: ReservationID -> List<Service>
     private Map<String, List<Service>> reservationServices = new HashMap<>();
@@ -125,11 +146,9 @@ public class BookMyStayApp {
         try {
             validateRoomType(roomType);
             validatePrice(basePrice);
-
             Reservation reservation = new Reservation(guestName, roomType, basePrice);
             bookingQueue.offer(reservation);
             System.out.println("Request added: " + reservation);
-
         } catch (InvalidBookingException e) {
             System.out.println("Booking submission failed: " + e.getMessage());
         }
@@ -159,6 +178,7 @@ public class BookMyStayApp {
 
             reservation.assignRoom(roomId);
             allocatedRooms.get(roomType).add(roomId);
+            rollbackStack.push(roomId);  // Track for potential cancellation
             inventory.put(roomType, inventory.get(roomType) - 1);
 
             bookingHistory.add(reservation);
@@ -171,32 +191,47 @@ public class BookMyStayApp {
     }
 
     // -----------------------------
-    // Add-On Service Selection
+    // Booking Cancellation
     // -----------------------------
-    public void addServiceToReservation(String reservationId, Service service) {
-        List<Service> services = reservationServices.getOrDefault(reservationId, new ArrayList<>());
-        services.add(service);
-        reservationServices.put(reservationId, services);
-        System.out.println("Added service to reservation " + reservationId + ": " + service);
-    }
+    public void cancelReservation(String reservationId) {
+        try {
+            Optional<Reservation> optionalReservation = bookingHistory.stream()
+                    .filter(r -> r.getRequestId().equals(reservationId))
+                    .findFirst();
 
-    public double calculateTotalServiceCost(String reservationId) {
-        List<Service> services = reservationServices.getOrDefault(reservationId, Collections.emptyList());
-        return services.stream().mapToDouble(Service::getPrice).sum();
-    }
+            if (!optionalReservation.isPresent()) {
+                throw new CancellationException("Reservation ID not found: " + reservationId);
+            }
 
-    public void displayReservationServices(String reservationId) {
-        List<Service> services = reservationServices.getOrDefault(reservationId, Collections.emptyList());
-        if (services.isEmpty()) {
-            System.out.println("No services selected for reservation " + reservationId);
-        } else {
-            System.out.println("Services for reservation " + reservationId + ": " + services);
-            System.out.println("Total additional cost: $" + calculateTotalServiceCost(reservationId));
+            Reservation reservation = optionalReservation.get();
+
+            if (reservation.isCancelled()) {
+                throw new CancellationException("Reservation already cancelled: " + reservationId);
+            }
+
+            // Rollback inventory
+            String roomType = reservation.getRoomType();
+            String roomId = reservation.getAssignedRoomId();
+
+            if (!rollbackStack.isEmpty() && rollbackStack.peek().equals(roomId)) {
+                rollbackStack.pop(); // LIFO rollback
+            } else {
+                rollbackStack.remove(roomId); // Remove from stack if out of order
+            }
+
+            allocatedRooms.get(roomType).remove(roomId);
+            inventory.put(roomType, inventory.getOrDefault(roomType, 0) + 1);
+
+            reservation.cancel();
+            System.out.println("Reservation cancelled successfully: " + reservation);
+
+        } catch (CancellationException e) {
+            System.out.println("Cancellation failed: " + e.getMessage());
         }
     }
 
     // -----------------------------
-    // Booking History & Reporting
+    // Display Booking History & Inventory
     // -----------------------------
     public void displayBookingHistory() {
         if (bookingHistory.isEmpty()) {
@@ -205,31 +240,6 @@ public class BookMyStayApp {
         }
         System.out.println("\nBooking History:");
         for (Reservation r : bookingHistory) {
-            System.out.println(r);
-        }
-    }
-
-    public void generateSummaryReport() {
-        System.out.println("\nBooking Summary Report:");
-        Map<String, Long> countByRoomType = new HashMap<>();
-        for (Reservation r : bookingHistory) {
-            countByRoomType.put(r.getRoomType(), countByRoomType.getOrDefault(r.getRoomType(), 0L) + 1);
-        }
-        for (Map.Entry<String, Long> entry : countByRoomType.entrySet()) {
-            System.out.println("Room Type: " + entry.getKey() + " | Bookings: " + entry.getValue());
-        }
-    }
-
-    // -----------------------------
-    // Display Queue & Inventory
-    // -----------------------------
-    public void displayQueue() {
-        if (bookingQueue.isEmpty()) {
-            System.out.println("Booking queue is empty.");
-            return;
-        }
-        System.out.println("\nCurrent Booking Queue:");
-        for (Reservation r : bookingQueue) {
             System.out.println(r);
         }
     }
@@ -247,20 +257,23 @@ public class BookMyStayApp {
     public static void main(String[] args) {
         BookMyStayApp app = new BookMyStayApp();
 
-        // Valid submissions
+        // Submit and process bookings
         app.submitRequest("Alice", "Deluxe", 150.0);
         app.submitRequest("Bob", "Standard", 100.0);
 
-        // Invalid submissions
-        app.submitRequest("Charlie", "Penthouse", 200.0);  // Invalid room type
-        app.submitRequest("David", "Suite", -50.0);        // Negative price
-
-        // Process bookings
         app.processNextRequest();
         app.processNextRequest();
 
-        // Attempt to process empty queue
-        app.processNextRequest();
+        // Display history and inventory before cancellation
+        app.displayBookingHistory();
+        app.displayInventory();
+
+        // Cancel Alice's reservation
+        String aliceId = app.bookingHistory.get(0).getRequestId();
+        app.cancelReservation(aliceId);
+
+        // Attempt to cancel again (should fail)
+        app.cancelReservation(aliceId);
 
         // Display final booking history and inventory
         app.displayBookingHistory();
