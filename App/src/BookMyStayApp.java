@@ -1,22 +1,25 @@
+import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
-public class BookMyStayApp {
+public class BookMyStayApp implements Serializable {
+    private static final long serialVersionUID = 1L;
+    private static final String PERSISTENCE_FILE = "bookmyStayData.ser";
+
+    // -----------------------------
+    // Custom Exceptions
+    // -----------------------------
     static class InvalidBookingException extends Exception {
-        public InvalidBookingException(String message) {
-            super(message);
-        }
+        public InvalidBookingException(String message) { super(message); }
     }
 
     static class CancellationException extends Exception {
-        public CancellationException(String message) {
-            super(message);
-        }
+        public CancellationException(String message) { super(message); }
     }
 
     // -----------------------------
     // Reservation
     // -----------------------------
-    static class Reservation {
+    static class Reservation implements Serializable {
         private String requestId;
         private String guestName;
         private String roomType;
@@ -56,10 +59,9 @@ public class BookMyStayApp {
     // -----------------------------
     // Add-On Service
     // -----------------------------
-    static class Service {
+    static class Service implements Serializable {
         private String name;
         private double price;
-
         public Service(String name, double price) { this.name = name; this.price = price; }
         public double getPrice() { return price; }
         @Override
@@ -69,12 +71,12 @@ public class BookMyStayApp {
     // -----------------------------
     // Shared Booking Data
     // -----------------------------
-    private final Queue<Reservation> bookingQueue = new LinkedList<>();
-    private final Map<String, Integer> inventory = new HashMap<>();
-    private final Map<String, Set<String>> allocatedRooms = new HashMap<>();
-    private final Stack<String> rollbackStack = new Stack<>();
-    private final Map<String, List<Service>> reservationServices = new HashMap<>();
-    private final List<Reservation> bookingHistory = new ArrayList<>();
+    private Queue<Reservation> bookingQueue = new LinkedList<>();
+    private Map<String, Integer> inventory = new HashMap<>();
+    private Map<String, Set<String>> allocatedRooms = new HashMap<>();
+    private Stack<String> rollbackStack = new Stack<>();
+    private Map<String, List<Service>> reservationServices = new HashMap<>();
+    private List<Reservation> bookingHistory = new ArrayList<>();
 
     public BookMyStayApp() {
         inventory.put("Deluxe", 2);
@@ -103,7 +105,7 @@ public class BookMyStayApp {
     }
 
     // -----------------------------
-    // Thread-safe Booking Submission
+    // Booking Submission & Processing
     // -----------------------------
     public synchronized void submitRequest(String guestName, String roomType, double basePrice) {
         try {
@@ -117,43 +119,66 @@ public class BookMyStayApp {
         }
     }
 
-    // -----------------------------
-    // Thread-safe Processing of Booking Requests
-    // -----------------------------
     public void processNextRequest() {
         Reservation reservation;
-        synchronized (this) {
-            reservation = bookingQueue.poll();
-        }
-        if (reservation == null) {
-            System.out.println("No requests to process.");
-            return;
-        }
+        synchronized (this) { reservation = bookingQueue.poll(); }
+        if (reservation == null) { System.out.println("No requests to process."); return; }
 
-        synchronized (this) { // Critical section for allocation
-            String roomType = reservation.getRoomType();
+        synchronized (this) { // Critical section
             try {
-                validateRoomType(roomType);
-                validateInventory(roomType);
+                validateRoomType(reservation.getRoomType());
+                validateInventory(reservation.getRoomType());
 
-                // Generate unique room ID
                 String roomId;
                 do {
-                    roomId = roomType.substring(0, 1).toUpperCase() + "-" + UUID.randomUUID().toString().substring(0, 5);
-                } while (allocatedRooms.get(roomType).contains(roomId));
+                    roomId = reservation.getRoomType().substring(0, 1).toUpperCase() + "-" +
+                            UUID.randomUUID().toString().substring(0, 5);
+                } while (allocatedRooms.get(reservation.getRoomType()).contains(roomId));
 
                 reservation.assignRoom(roomId);
-                allocatedRooms.get(roomType).add(roomId);
+                allocatedRooms.get(reservation.getRoomType()).add(roomId);
                 rollbackStack.push(roomId);
-                inventory.put(roomType, inventory.get(roomType) - 1);
+                inventory.put(reservation.getRoomType(), inventory.get(reservation.getRoomType()) - 1);
                 bookingHistory.add(reservation);
 
                 System.out.println("Reservation confirmed: " + reservation);
-                System.out.println("Remaining " + roomType + " rooms: " + inventory.get(roomType));
+                System.out.println("Remaining " + reservation.getRoomType() + " rooms: " +
+                        inventory.get(reservation.getRoomType()));
 
             } catch (InvalidBookingException e) {
                 System.out.println("Failed to process reservation for " + reservation.getGuestName() + ": " + e.getMessage());
             }
+        }
+    }
+
+    // -----------------------------
+    // Data Persistence
+    // -----------------------------
+    public void saveState() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(PERSISTENCE_FILE))) {
+            synchronized (this) {
+                oos.writeObject(this);
+            }
+            System.out.println("System state saved successfully.");
+        } catch (IOException e) {
+            System.out.println("Failed to save system state: " + e.getMessage());
+        }
+    }
+
+    public static BookMyStayApp restoreState() {
+        File file = new File(PERSISTENCE_FILE);
+        if (!file.exists()) {
+            System.out.println("No previous state found. Starting fresh.");
+            return new BookMyStayApp();
+        }
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
+            BookMyStayApp app = (BookMyStayApp) ois.readObject();
+            System.out.println("System state restored successfully.");
+            return app;
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("Failed to restore system state: " + e.getMessage());
+            System.out.println("Starting with a fresh system state.");
+            return new BookMyStayApp();
         }
     }
 
@@ -173,38 +198,25 @@ public class BookMyStayApp {
     }
 
     // -----------------------------
-    // Concurrent Booking Simulation
+    // Main Method (Demo)
     // -----------------------------
     public static void main(String[] args) throws InterruptedException {
-        BookMyStayApp app = new BookMyStayApp();
+        // Restore previous state or start fresh
+        BookMyStayApp app = BookMyStayApp.restoreState();
 
-        // Simulate 5 guests submitting requests concurrently
-        ExecutorService executor = Executors.newFixedThreadPool(5);
-        String[] guestNames = {"Alice", "Bob", "Charlie", "David", "Eva"};
-        String[] roomTypes = {"Deluxe", "Standard", "Suite", "Deluxe", "Standard"};
-        double[] prices = {150.0, 100.0, 250.0, 150.0, 100.0};
+        // Submit new requests
+        app.submitRequest("Alice", "Deluxe", 150.0);
+        app.submitRequest("Bob", "Standard", 100.0);
 
-        for (int i = 0; i < guestNames.length; i++) {
-            final int index = i;
-            executor.submit(() -> app.submitRequest(guestNames[index], roomTypes[index], prices[index]));
-        }
+        // Process bookings
+        app.processNextRequest();
+        app.processNextRequest();
 
-        executor.shutdown();
-        executor.awaitTermination(5, TimeUnit.SECONDS);
-
-        System.out.println("\n--- Processing Bookings Concurrently ---\n");
-
-        // Simulate multiple threads processing bookings
-        ExecutorService processor = Executors.newFixedThreadPool(3);
-        for (int i = 0; i < 5; i++) {
-            processor.submit(app::processNextRequest);
-        }
-
-        processor.shutdown();
-        processor.awaitTermination(5, TimeUnit.SECONDS);
-
-        // Display final state
+        // Display state
         app.displayBookingHistory();
         app.displayInventory();
+
+        // Save state before shutdown
+        app.saveState();
     }
 }
