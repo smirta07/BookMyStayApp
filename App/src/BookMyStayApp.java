@@ -1,5 +1,14 @@
 import java.util.*;
 public class BookMyStayApp {
+    static class InvalidBookingException extends Exception {
+        public InvalidBookingException(String message) {
+            super(message);
+        }
+    }
+
+    // -----------------------------
+    // Reservation (Guest Request)
+    // -----------------------------
     static class Reservation {
         private String requestId;
         private String guestName;
@@ -65,20 +74,16 @@ public class BookMyStayApp {
     }
 
     // -----------------------------
-    // Booking Queue
+    // Booking Queue & Inventory
     // -----------------------------
     private Queue<Reservation> bookingQueue = new LinkedList<>();
-
-    // Inventory & Allocation
     private Map<String, Integer> inventory = new HashMap<>();
     private Map<String, Set<String>> allocatedRooms = new HashMap<>();
 
     // Add-On Services: ReservationID -> List<Service>
     private Map<String, List<Service>> reservationServices = new HashMap<>();
 
-    // -----------------------------
-    // Booking History (Use Case 8)
-    // -----------------------------
+    // Booking History
     private List<Reservation> bookingHistory = new ArrayList<>();
 
     public BookMyStayApp() {
@@ -92,16 +97,42 @@ public class BookMyStayApp {
     }
 
     // -----------------------------
+    // Validation Methods
+    // -----------------------------
+    private void validateRoomType(String roomType) throws InvalidBookingException {
+        if (!inventory.containsKey(roomType)) {
+            throw new InvalidBookingException("Invalid room type: " + roomType);
+        }
+    }
+
+    private void validatePrice(double price) throws InvalidBookingException {
+        if (price < 0) {
+            throw new InvalidBookingException("Base price cannot be negative: " + price);
+        }
+    }
+
+    private void validateInventory(String roomType) throws InvalidBookingException {
+        int available = inventory.getOrDefault(roomType, 0);
+        if (available <= 0) {
+            throw new InvalidBookingException("No available rooms for type: " + roomType);
+        }
+    }
+
+    // -----------------------------
     // Submit Booking Request
     // -----------------------------
     public void submitRequest(String guestName, String roomType, double basePrice) {
-        if (!inventory.containsKey(roomType)) {
-            System.out.println("Invalid room type: " + roomType);
-            return;
+        try {
+            validateRoomType(roomType);
+            validatePrice(basePrice);
+
+            Reservation reservation = new Reservation(guestName, roomType, basePrice);
+            bookingQueue.offer(reservation);
+            System.out.println("Request added: " + reservation);
+
+        } catch (InvalidBookingException e) {
+            System.out.println("Booking submission failed: " + e.getMessage());
         }
-        Reservation reservation = new Reservation(guestName, roomType, basePrice);
-        bookingQueue.offer(reservation);
-        System.out.println("Request added: " + reservation);
     }
 
     // -----------------------------
@@ -115,28 +146,28 @@ public class BookMyStayApp {
         }
 
         String roomType = reservation.getRoomType();
-        int available = inventory.getOrDefault(roomType, 0);
 
-        if (available <= 0) {
-            System.out.println("No available rooms for type: " + roomType + ". Cannot confirm reservation for " + reservation.getGuestName());
-            return;
+        try {
+            validateRoomType(roomType);
+            validateInventory(roomType);
+
+            // Generate unique room ID
+            String roomId;
+            do {
+                roomId = roomType.substring(0, 1).toUpperCase() + "-" + UUID.randomUUID().toString().substring(0, 5);
+            } while (allocatedRooms.get(roomType).contains(roomId));
+
+            reservation.assignRoom(roomId);
+            allocatedRooms.get(roomType).add(roomId);
+            inventory.put(roomType, inventory.get(roomType) - 1);
+
+            bookingHistory.add(reservation);
+            System.out.println("Reservation confirmed: " + reservation);
+            System.out.println("Remaining " + roomType + " rooms: " + inventory.get(roomType));
+
+        } catch (InvalidBookingException e) {
+            System.out.println("Failed to process reservation for " + reservation.getGuestName() + ": " + e.getMessage());
         }
-
-        // Generate unique room ID
-        String roomId;
-        do {
-            roomId = roomType.substring(0, 1).toUpperCase() + "-" + UUID.randomUUID().toString().substring(0, 5);
-        } while (allocatedRooms.get(roomType).contains(roomId));
-
-        reservation.assignRoom(roomId);
-        allocatedRooms.get(roomType).add(roomId);
-        inventory.put(roomType, available - 1);
-
-        // Add to booking history (chronological order preserved)
-        bookingHistory.add(reservation);
-
-        System.out.println("Reservation confirmed: " + reservation);
-        System.out.println("Remaining " + roomType + " rooms: " + inventory.get(roomType));
     }
 
     // -----------------------------
@@ -165,14 +196,14 @@ public class BookMyStayApp {
     }
 
     // -----------------------------
-    // Reporting & History
+    // Booking History & Reporting
     // -----------------------------
     public void displayBookingHistory() {
         if (bookingHistory.isEmpty()) {
             System.out.println("No confirmed reservations yet.");
             return;
         }
-        System.out.println("\nBooking History (chronological):");
+        System.out.println("\nBooking History:");
         for (Reservation r : bookingHistory) {
             System.out.println(r);
         }
@@ -184,7 +215,6 @@ public class BookMyStayApp {
         for (Reservation r : bookingHistory) {
             countByRoomType.put(r.getRoomType(), countByRoomType.getOrDefault(r.getRoomType(), 0L) + 1);
         }
-
         for (Map.Entry<String, Long> entry : countByRoomType.entrySet()) {
             System.out.println("Room Type: " + entry.getKey() + " | Bookings: " + entry.getValue());
         }
@@ -217,23 +247,23 @@ public class BookMyStayApp {
     public static void main(String[] args) {
         BookMyStayApp app = new BookMyStayApp();
 
-        // Submit requests
+        // Valid submissions
         app.submitRequest("Alice", "Deluxe", 150.0);
         app.submitRequest("Bob", "Standard", 100.0);
-        app.submitRequest("Charlie", "Suite", 250.0);
 
-        // Process all bookings
+        // Invalid submissions
+        app.submitRequest("Charlie", "Penthouse", 200.0);  // Invalid room type
+        app.submitRequest("David", "Suite", -50.0);        // Negative price
+
+        // Process bookings
         app.processNextRequest();
         app.processNextRequest();
+
+        // Attempt to process empty queue
         app.processNextRequest();
 
-        // Add-on services
-        String aliceRoomId = app.allocatedRooms.get("Deluxe").iterator().next();
-        app.addServiceToReservation(aliceRoomId, new Service("Breakfast", 20.0));
-        app.addServiceToReservation(aliceRoomId, new Service("Spa", 50.0));
-
-        // Display history and reports
+        // Display final booking history and inventory
         app.displayBookingHistory();
-        app.generateSummaryReport();
+        app.displayInventory();
     }
 }
